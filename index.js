@@ -1,9 +1,6 @@
-import express from "express";
 import fetch from "node-fetch";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { config } from "dotenv";
-
-config();
+import express from "express";
 
 const app = express();
 app.use(express.json());
@@ -30,34 +27,36 @@ app.post("/upload", async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: "Missing file URL" });
 
+    // Download file
     const response = await fetch(url);
-    if (!response.ok) throw new Error("Failed to download file");
+    if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
 
     const contentType = response.headers.get("content-type") || "application/octet-stream";
-    const filename = url.split("/").pop().split("?")[0]; // strip filename from URL
-    const key = `bubble-uploaded/${Date.now()}-${filename}`;
+    const buffer = await response.arrayBuffer();
+    const body = Buffer.from(buffer);
+    const contentLength = body.length;
 
-    await s3.send(new PutObjectCommand({
+    const filename = `bubble-${Date.now()}`; // generate simple name
+
+    const command = new PutObjectCommand({
       Bucket: R2_BUCKET,
-      Key: key,
-      Body: response.body,
-      ContentType: contentType
-    }));
+      Key: filename,
+      Body: body,
+      ContentType: contentType,
+      ContentLength: contentLength
+    });
 
-    const publicUrl = `${R2_BASE_URL}/${key}`;
+    await s3.send(command);
 
-    return res.json({ success: true, url: publicUrl });
+    const r2Url = `${R2_BASE_URL}/${filename}`;
+
+    return res.json({ success: true, url: r2Url });
   } catch (err) {
     console.error("Upload error:", err);
     return res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("Bubble to R2 uploader is running.");
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(3000, () => {
   console.log("Server running...");
 });
