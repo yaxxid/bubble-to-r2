@@ -1,4 +1,6 @@
 import express from "express";
+import fetch from "node-fetch";
+import { Readable } from "stream";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import dotenv from "dotenv";
 
@@ -29,23 +31,27 @@ app.post("/upload", async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: "Missing file URL" });
 
+    // Stream from Bubble URL
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file: ${response.status}`);
+    }
 
     const contentType = response.headers.get("content-type") || "application/octet-stream";
-    const filename = `bubble-${Date.now()}`;
+    const objectKey = `bubble-${Date.now()}`;
 
     const command = new PutObjectCommand({
       Bucket: R2_BUCKET,
-      Key: filename,
-      Body: response.body, // Streaming directly
+      Key: objectKey,
+      Body: Readable.from(response.body),
       ContentType: contentType
     });
 
     await s3.send(command);
 
-    const finalUrl = `${R2_BASE_URL}/${filename}`;
+    const finalUrl = `${R2_BASE_URL}/${objectKey}`;
     return res.json({ success: true, url: finalUrl });
+
   } catch (err) {
     console.error("Upload error:", err);
     return res.status(500).json({ error: err.message });
