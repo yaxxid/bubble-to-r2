@@ -1,6 +1,7 @@
-import fetch from "node-fetch";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import express from "express";
+import fetch from "node-fetch";
+import { S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 
 const app = express();
 app.use(express.json());
@@ -27,29 +28,25 @@ app.post("/upload", async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: "Missing file URL" });
 
-    // Download file
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
 
     const contentType = response.headers.get("content-type") || "application/octet-stream";
-    const buffer = await response.arrayBuffer();
-    const body = Buffer.from(buffer);
-    const contentLength = body.length;
+    const filename = `bubble-${Date.now()}`;
 
-    const filename = `bubble-${Date.now()}`; // generate simple name
-
-    const command = new PutObjectCommand({
-      Bucket: R2_BUCKET,
-      Key: filename,
-      Body: body,
-      ContentType: contentType,
-      ContentLength: contentLength
+    const upload = new Upload({
+      client: s3,
+      params: {
+        Bucket: R2_BUCKET,
+        Key: filename,
+        Body: response.body, // This is a readable stream
+        ContentType: contentType
+      }
     });
 
-    await s3.send(command);
+    await upload.done();
 
     const r2Url = `${R2_BASE_URL}/${filename}`;
-
     return res.json({ success: true, url: r2Url });
   } catch (err) {
     console.error("Upload error:", err);
