@@ -1,15 +1,11 @@
 import express from "express";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { pipeline } from "stream";
-import { promisify } from "util";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
-
-const streamPipeline = promisify(pipeline);
 
 const {
   R2_BUCKET,
@@ -33,18 +29,16 @@ app.post("/upload", async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: "Missing file URL" });
 
-    // Stream directly from Bubble
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
 
     const contentType = response.headers.get("content-type") || "application/octet-stream";
     const filename = `bubble-${Date.now()}`;
 
-    // Upload stream directly to R2
     const command = new PutObjectCommand({
       Bucket: R2_BUCKET,
       Key: filename,
-      Body: response.body, // <--- streaming body
+      Body: response.body, // Streaming directly
       ContentType: contentType
     });
 
