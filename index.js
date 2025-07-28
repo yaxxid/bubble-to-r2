@@ -1,7 +1,7 @@
 import express from "express";
 import fetch from "node-fetch";
-import { Readable } from "stream";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -23,7 +23,8 @@ const s3 = new S3Client({
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID,
     secretAccessKey: R2_SECRET_ACCESS_KEY
-  }
+  },
+  forcePathStyle: true
 });
 
 app.post("/upload", async (req, res) => {
@@ -31,27 +32,28 @@ app.post("/upload", async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: "Missing file URL" });
 
-    // Stream from Bubble URL
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch file: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
 
     const contentType = response.headers.get("content-type") || "application/octet-stream";
-    const objectKey = `bubble-${Date.now()}`;
+    const filename = `bubble-${Date.now()}`;
 
-    const command = new PutObjectCommand({
-      Bucket: R2_BUCKET,
-      Key: objectKey,
-      Body: Readable.from(response.body),
-      ContentType: contentType
+    // ✅ Use Upload from lib-storage to stream directly
+    const upload = new Upload({
+      client: s3,
+      params: {
+        Bucket: R2_BUCKET,
+        Key: filename,
+        Body: response.body,
+        ContentType: contentType
+      },
+      leavePartsOnError: false
     });
 
-    await s3.send(command);
+    await upload.done();
 
-    const finalUrl = `${R2_BASE_URL}/${objectKey}`;
+    const finalUrl = `${R2_BASE_URL}/${filename}`;
     return res.json({ success: true, url: finalUrl });
-
   } catch (err) {
     console.error("Upload error:", err);
     return res.status(500).json({ error: err.message });
