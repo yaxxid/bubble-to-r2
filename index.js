@@ -2,48 +2,59 @@ import express from "express";
 import fetch from "node-fetch";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { config } from "dotenv";
+
 config();
 
 const app = express();
 app.use(express.json());
 
-app.post("/upload/:fileId", async (req, res) => {
-  try {
-    const { fileId } = req.params;
-    const { url, contentType } = req.body;
+const {
+  R2_BUCKET,
+  R2_ACCOUNT_ID,
+  R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY,
+  R2_BASE_URL
+} = process.env;
 
-    if (!url || !fileId) {
-      return res.status(400).json({ error: "Missing file URL or file ID" });
-    }
+const s3 = new S3Client({
+  region: "auto",
+  endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY
+  }
+});
+
+app.post("/upload", async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: "Missing file URL" });
 
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error("Failed to fetch file from Bubble URL");
-    }
+    if (!response.ok) throw new Error("Failed to download file");
 
-    const s3 = new S3Client({
-      region: "auto",
-      endpoint: process.env.R2_BASE_URL,
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-      },
-    });
+    const contentType = response.headers.get("content-type") || "application/octet-stream";
+    const filename = url.split("/").pop().split("?")[0]; // strip filename from URL
+    const key = `bubble-uploaded/${Date.now()}-${filename}`;
 
-    const key = `uploads/${fileId}`;
-
-    const uploadCommand = new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET,
+    await s3.send(new PutObjectCommand({
+      Bucket: R2_BUCKET,
       Key: key,
       Body: response.body,
-      ContentType: contentType || "application/octet-stream",
-    });
+      ContentType: contentType
+    }));
 
-    await s3.send(uploadCommand);
-    res.json({ success: true, r2_url: `${process.env.R2_BASE_URL}/${key}` });
+    const publicUrl = `${R2_BASE_URL}/${key}`;
+
+    return res.json({ success: true, url: publicUrl });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Upload error:", err);
+    return res.status(500).json({ error: err.message });
   }
+});
+
+app.get("/", (req, res) => {
+  res.send("Bubble to R2 uploader is running.");
 });
 
 const PORT = process.env.PORT || 3000;
