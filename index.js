@@ -32,31 +32,48 @@ app.post("/upload", async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: "Missing file URL" });
 
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
-
-    const contentType = response.headers.get("content-type") || "application/octet-stream";
     const filename = `bubble-${Date.now()}`;
-
-    // ✅ Use Upload from lib-storage to stream directly
-    const upload = new Upload({
-      client: s3,
-      params: {
-        Bucket: R2_BUCKET,
-        Key: filename,
-        Body: response.body,
-        ContentType: contentType
-      },
-      leavePartsOnError: false
-    });
-
-    await upload.done();
-
     const finalUrl = `${R2_BASE_URL}/${filename}`;
-    return res.json({ success: true, url: finalUrl });
+
+    // Respond immediately so the client doesn't time out
+    res.json({ success: true, url: finalUrl, status: "uploading" });
+
+    // Continue the streaming upload in background
+    (async () => {
+      try {
+        console.time("fetch");
+        const response = await fetch(url);
+        console.timeEnd("fetch");
+
+        if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
+
+        const contentType = response.headers.get("content-type") || "application/octet-stream";
+
+        console.time("upload");
+        const upload = new Upload({
+          client: s3,
+          params: {
+            Bucket: R2_BUCKET,
+            Key: filename,
+            Body: response.body, // streaming intact
+            ContentType: contentType
+          },
+          leavePartsOnError: false
+        });
+
+        await upload.done();
+        console.timeEnd("upload");
+
+        console.log(`✅ Upload complete: ${finalUrl}`);
+      } catch (err) {
+        console.error(`❌ Upload failed for ${url}:`, err);
+      }
+    })();
   } catch (err) {
     console.error("Upload error:", err);
-    return res.status(500).json({ error: err.message });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message });
+    }
   }
 });
 
